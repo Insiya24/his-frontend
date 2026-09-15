@@ -5,8 +5,10 @@ import type {
 } from "@/types/productRequest";
 
 export const productRequestsApi = {
-  list(): Promise<ProductRequest[]> {
-    return httpGet<ProductRequest[]>("/product-requests");
+  list(status?: string): Promise<ProductRequest[]> {
+    return httpGet<ProductRequest[]>("/product-requests", {
+      status: status || undefined,
+    });
   },
 
   create(payload: ProductRequestCreateRequest): Promise<ProductRequest> {

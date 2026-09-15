@@ -17,9 +17,9 @@ import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, Input, Textarea } from "@/components/ui/Form";
 import { Drawer } from "@/components/ui/Drawer";
-import { Modal } from "@/components/ui/Modal";
+import { Modal, ConfirmDialog } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import { IconClipboardCheck, IconEye, IconPencil, IconPlus } from "@/components/icons";
+import { IconClipboardCheck, IconEye, IconPencil, IconPlus, IconTrash } from "@/components/icons";
 import { getApiErrorMessage } from "@/utils/errors";
 import { enumLabel, formatDate, formatTime, todayISO } from "@/utils/format";
 
@@ -49,6 +49,7 @@ export function CleaningPage() {
   const role = user!.role;
   const createAllowed = can(role, "cleaning.create") && role === "MANAGER";
   const updateAllowed = can(role, "cleaning.update");
+  const deleteAllowed = can(role, "cleaning.delete");
 
   const query = useQuery({
     queryKey: [ROOT_KEYS.cleaning, scopeBranchId],
@@ -103,6 +104,18 @@ export function CleaningPage() {
   // Detail drawer
   const [viewing, setViewing] = useState<CleaningChecklist | null>(null);
 
+  // Delete
+  const [deleting, setDeleting] = useState<CleaningChecklist | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => cleaningApi.remove(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Checklist deleted");
+      setDeleting(null);
+    },
+    onError: (error) => toast.error("Could not delete", getApiErrorMessage(error)),
+  });
+
   const openCreate = () => {
     setEditingId(null);
     setChecklistDate(todayISO());
@@ -148,6 +161,14 @@ export function CleaningPage() {
     setFormError(null);
     if (!checklistDate) {
       setFormError("Checklist date is required");
+      return;
+    }
+    if (checklistDate > todayISO()) {
+      setFormError("Checklist date cannot be in the future");
+      return;
+    }
+    if (morningTiming && eveningTiming && eveningTiming <= morningTiming) {
+      setFormError("Evening timing must be after morning timing");
       return;
     }
     const payloadItems: Record<string, CleaningItemPayload> = {};
@@ -241,7 +262,7 @@ export function CleaningPage() {
     {
       key: "actions",
       header: "",
-      className: "w-20 text-right",
+      className: "w-24 text-right",
       render: (row) => (
         <div className="flex items-center justify-end gap-1">
           <button
@@ -258,6 +279,15 @@ export function CleaningPage() {
               aria-label="Edit checklist"
             >
               <IconPencil className="h-4 w-4" />
+            </button>
+          )}
+          {deleteAllowed && (
+            <button
+              onClick={() => setDeleting(row)}
+              className="rounded p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+              aria-label="Delete checklist"
+            >
+              <IconTrash className="h-4 w-4" />
             </button>
           )}
         </div>
@@ -344,6 +374,7 @@ export function CleaningPage() {
             <Input
               label="Checklist date"
               type="date"
+              max={todayISO()}
               value={checklistDate}
               onChange={(event) => setChecklistDate(event.target.value)}
               required
@@ -471,6 +502,23 @@ export function CleaningPage() {
           </div>
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title="Delete checklist"
+        message={
+          <>
+            Delete the checklist for{" "}
+            <strong>{deleting ? formatDate(deleting.checklist_date) : ""}</strong>? This cannot
+            be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        onCancel={() => setDeleting(null)}
+      />
 
       {/* Detail drawer */}
       <Drawer

@@ -15,11 +15,8 @@ import { AttendancePage } from "@/pages/modules/AttendancePage";
 import { CleaningPage } from "@/pages/modules/CleaningPage";
 import { InventoryPage } from "@/pages/modules/InventoryPage";
 import { ProductRequestsPage } from "@/pages/modules/ProductRequestsPage";
-import { CustomersPage } from "@/pages/modules/CustomersPage";
 import { ReviewsPage } from "@/pages/modules/ReviewsPage";
 import { ComplaintsPage } from "@/pages/modules/ComplaintsPage";
-import { InspectionsPage } from "@/pages/modules/InspectionsPage";
-import { SpecialRemarksPage } from "@/pages/modules/SpecialRemarksPage";
 import { ReportsPage } from "@/pages/modules/ReportsPage";
 import { AuditPage } from "@/pages/modules/AuditPage";
 
@@ -54,11 +51,8 @@ export default function App() {
               <Route path="cleaning" element={<CleaningPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="product-requests" element={<ProductRequestsPage />} />
-              <Route path="customers" element={<CustomersPage />} />
               <Route path="reviews" element={<ReviewsPage />} />
               <Route path="complaints" element={<ComplaintsPage />} />
-              <Route path="inspections" element={<InspectionsPage />} />
-              <Route path="special-remarks" element={<SpecialRemarksPage />} />
               <Route path="reports" element={<ReportsPage />} />
               <Route path="audit" element={<AuditPage />} />
               <Route path="*" element={<NotFoundPage />} />
@@ -75,11 +69,8 @@ export default function App() {
               <Route path="cleaning" element={<CleaningPage />} />
               <Route path="inventory" element={<InventoryPage />} />
               <Route path="product-requests" element={<ProductRequestsPage />} />
-              <Route path="customers" element={<CustomersPage />} />
               <Route path="reviews" element={<ReviewsPage />} />
               <Route path="complaints" element={<ComplaintsPage />} />
-              <Route path="inspections" element={<InspectionsPage />} />
-              <Route path="special-remarks" element={<SpecialRemarksPage />} />
               <Route path="reports" element={<ReportsPage />} />
               <Route path="*" element={<NotFoundPage />} />
             </Route>

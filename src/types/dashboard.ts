@@ -22,9 +22,7 @@ export interface AdminDashboardData {
   out_of_stock: number;
   pending_product_requests: number;
   open_complaints: number;
-  today_inspections: number;
   inventory_alerts: number;
-  today_customers: number;
   recent_reviews: RecentReview[];
   average_rating: number;
   branch_reports: BranchReportRow[];
@@ -38,8 +36,6 @@ export interface ManagerDashboardData {
   out_of_stock: number;
   pending_requests: number;
   open_complaints: number;
-  today_inspections: number;
   inventory_alerts: number;
-  today_customers: number;
   recent_reviews: RecentReview[];
 }

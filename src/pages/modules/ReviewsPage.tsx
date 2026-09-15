@@ -1,7 +1,6 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { reviewsApi } from "@/api/reviews";
-import { customersApi } from "@/api/customers";
 import { ROOT_KEYS } from "@/api/queryKeys";
 import { useAuth } from "@/hooks/useAuth";
 import { useBranches } from "@/hooks/useBranches";
@@ -36,7 +35,7 @@ export function ReviewsPage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { scopeBranchId } = useBranches();
+  const { scopeBranchId, scopeBranchName } = useBranches();
   const createAllowed = can(user!.role, "reviews.create");
   const updateAllowed = can(user!.role, "reviews.update");
 
@@ -44,24 +43,6 @@ export function ReviewsPage() {
     queryKey: [ROOT_KEYS.reviews, scopeBranchId],
     queryFn: () => reviewsApi.list(scopeBranchId ?? undefined),
   });
-
-  const customersParams = useMemo(
-    () => ({ branch_id: scopeBranchId ?? undefined }),
-    [scopeBranchId],
-  );
-  const customersQuery = useQuery({
-    queryKey: [ROOT_KEYS.customers, customersParams],
-    queryFn: () => customersApi.list(customersParams),
-    enabled: createAllowed || updateAllowed,
-  });
-
-  const customerNameById = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const customer of customersQuery.data ?? []) {
-      map.set(customer.id, customer.customer_name);
-    }
-    return map;
-  }, [customersQuery.data]);
 
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: [ROOT_KEYS.reviews] });
@@ -72,7 +53,6 @@ export function ReviewsPage() {
   // Create
   const [createOpen, setCreateOpen] = useState(false);
   const [form, setForm] = useState({
-    customer_id: "",
     rating: "5",
     review: "",
     complaint: "",
@@ -95,7 +75,7 @@ export function ReviewsPage() {
   });
 
   const openCreate = () => {
-    setForm({ customer_id: "", rating: "5", review: "", complaint: "", review_date: todayISO() });
+    setForm({ rating: "5", review: "", complaint: "", review_date: todayISO() });
     setErrors({});
     setFormError(null);
     setCreateOpen(true);
@@ -105,7 +85,6 @@ export function ReviewsPage() {
     event.preventDefault();
     setFormError(null);
     const nextErrors: Record<string, string> = {};
-    if (!form.customer_id) nextErrors.customer_id = "Select a customer";
     const rating = Number(form.rating);
     if (!Number.isInteger(rating) || rating < 1 || rating > 5) {
       nextErrors.rating = "Rating must be between 1 and 5";
@@ -113,7 +92,6 @@ export function ReviewsPage() {
     setErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
     createMutation.mutate({
-      customer_id: Number(form.customer_id),
       rating,
       review: form.review.trim() || undefined,
       complaint: form.complaint.trim() || undefined,
@@ -178,12 +156,18 @@ export function ReviewsPage() {
       header: "Date",
       render: (row) => formatDate(row.review_date),
     },
-    {
-      key: "customer_id",
-      header: "Customer",
-      render: (row) =>
-        customerNameById.get(row.customer_id) ?? `Customer #${row.customer_id}`,
-    },
+    ...(user!.role === "ADMIN"
+      ? [
+          {
+            key: "branch_id" as const,
+            header: "Branch",
+            render: (row: ReviewRecord) =>
+              row.branch_id === scopeBranchId && scopeBranchName
+                ? scopeBranchName
+                : `Branch #${row.branch_id}`,
+          },
+        ]
+      : []),
     {
       key: "rating",
       header: "Rating",
@@ -234,10 +218,14 @@ export function ReviewsPage() {
     <div>
       <PageHeader
         title="Reviews"
-        subtitle="Customer feedback captured at the branch."
+        subtitle={
+          scopeBranchName
+            ? `Customer feedback — ${scopeBranchName}.`
+            : "Customer feedback across branches."
+        }
         actions={
           createAllowed && (
-            <Button onClick={openCreate} disabled={(customersQuery.data ?? []).length === 0}>
+            <Button onClick={openCreate}>
               <IconPlus className="h-4 w-4" />
               New review
             </Button>
@@ -253,14 +241,9 @@ export function ReviewsPage() {
         error={query.error}
         onRetry={() => query.refetch()}
         emptyTitle="No reviews yet"
-        emptyDescription={
-          createAllowed && (customersQuery.data ?? []).length === 0
-            ? "Add customers first — every review is linked to a customer visit."
-            : "Reviews will appear here as they are recorded."
-        }
+        emptyDescription="Reviews will appear here as they are recorded."
         emptyAction={
-          createAllowed &&
-          (customersQuery.data ?? []).length > 0 && (
+          createAllowed && (
             <Button onClick={openCreate}>
               <IconPlus className="h-4 w-4" />
               New review
@@ -274,6 +257,7 @@ export function ReviewsPage() {
         open={createOpen}
         onClose={() => setCreateOpen(false)}
         title="New review"
+        subtitle="Recorded against your branch."
         footer={
           <>
             <Button variant="secondary" onClick={() => setCreateOpen(false)} disabled={createMutation.isPending}>
@@ -292,20 +276,6 @@ export function ReviewsPage() {
             </div>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
-            <Select
-              label="Customer"
-              value={form.customer_id}
-              onChange={(event) => setForm({ ...form, customer_id: event.target.value })}
-              error={errors.customer_id}
-              required
-            >
-              <option value="">Select customer…</option>
-              {(customersQuery.data ?? []).map((customer) => (
-                <option key={customer.id} value={customer.id}>
-                  {customer.customer_name} · {customer.mobile_number}
-                </option>
-              ))}
-            </Select>
             <Select
               label="Rating"
               value={form.rating}
@@ -349,7 +319,6 @@ export function ReviewsPage() {
         open={editing !== null}
         onClose={() => setEditing(null)}
         title="Edit review"
-        subtitle={editing ? customerNameById.get(editing.customer_id) ?? `Customer #${editing.customer_id}` : undefined}
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditing(null)} disabled={updateMutation.isPending}>

@@ -1,6 +1,6 @@
 export interface ReviewRecord {
   id: number;
-  customer_id: number;
+  customer_id: number | null;
   branch_id: number;
   rating: number;
   review: string | null;
@@ -9,7 +9,8 @@ export interface ReviewRecord {
 }
 
 export interface ReviewCreateRequest {
-  customer_id: number;
+  branch_id?: number;
+  customer_id?: number;
   rating: number;
   review?: string;
   complaint?: string;

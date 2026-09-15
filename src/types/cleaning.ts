@@ -10,6 +10,8 @@ export type CleaningItemStatus = (typeof CLEANING_ITEM_STATUSES)[number];
 export interface CleaningChecklist {
   id: number;
   branch_id: number;
+  branch_name?: string | null;
+  branch_code?: string | null;
   checklist_date: string;
   items: Record<string, CleaningItemData>;
   completed_by_id: number;

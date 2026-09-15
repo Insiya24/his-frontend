@@ -9,7 +9,6 @@ import {
   IconCheck,
   IconMessageSquare,
   IconPackage,
-  IconShield,
   IconTruck,
   IconUsers,
   IconX,
@@ -95,18 +94,6 @@ export function ManagerDashboardPage() {
               tone={data.open_complaints > 0 ? "danger" : "default"}
               icon={<IconMessageSquare className="h-4 w-4" />}
               to="/manager/complaints"
-            />
-            <KpiCard
-              label="Inspections today"
-              value={data.today_inspections}
-              icon={<IconShield className="h-4 w-4" />}
-              to="/manager/inspections"
-            />
-            <KpiCard
-              label="Customers today"
-              value={data.today_customers}
-              icon={<IconUsers className="h-4 w-4" />}
-              to="/manager/customers"
             />
           </div>
 

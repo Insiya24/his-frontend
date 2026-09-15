@@ -9,6 +9,7 @@ import { can } from "@/utils/permissions";
 import type {
   AttendanceRecord,
   AttendanceStatus,
+  AttendanceTableRow,
 } from "@/types/attendance";
 import { ATTENDANCE_STATUSES } from "@/types/attendance";
 import { FilterBar, PageHeader } from "@/components/FilterBar";
@@ -17,9 +18,9 @@ import { Pagination } from "@/components/Pagination";
 import { StatusBadge } from "@/components/ui/StatusBadge";
 import { Button } from "@/components/ui/Button";
 import { Checkbox, Input, Select, Textarea } from "@/components/ui/Form";
-import { Modal } from "@/components/ui/Modal";
+import { Modal, ConfirmDialog } from "@/components/ui/Modal";
 import { useToast } from "@/components/ui/Toast";
-import { IconCheck, IconPencil, IconPlus, IconX } from "@/components/icons";
+import { IconCheck, IconPencil, IconPlus, IconTrash, IconX } from "@/components/icons";
 import { getApiErrorMessage, getFieldErrors } from "@/utils/errors";
 import { enumLabel, formatDate, formatTime, todayISO } from "@/utils/format";
 
@@ -38,6 +39,7 @@ interface CreateFormState {
 }
 
 interface EditFormState {
+  attendance_date: string;
   status: AttendanceStatus;
   check_in: string;
   check_out: string;
@@ -66,16 +68,34 @@ function CheckCross({ value }: { value: boolean }) {
   );
 }
 
+/** Shared client-side rules mirroring the backend validators. */
+function validateTimes(
+  status: AttendanceStatus,
+  checkIn: string,
+  checkOut: string,
+): string | null {
+  if ((status === "ABSENT" || status === "LEAVE") && (checkIn || checkOut)) {
+    return "Check-in/out must be empty for Absent or Leave";
+  }
+  if (checkIn && checkOut && checkOut <= checkIn) {
+    return "Check-out must be after check-in";
+  }
+  return null;
+}
+
 export function AttendancePage() {
   const toast = useToast();
   const queryClient = useQueryClient();
   const { user } = useAuth();
-  const { scopeBranchId } = useBranches();
+  const { scopeBranchId, scopeBranchName } = useBranches();
   const role = user!.role;
   const markAllowed = can(role, "attendance.mark");
   const editAllowed = can(role, "attendance.edit");
+  const deleteAllowed = can(role, "attendance.delete");
 
-  // Filters
+  const [view, setView] = useState<"records" | "mark-day">("records");
+
+  // ---------- Records view filters ----------
   const [filterDate, setFilterDate] = useState(todayISO());
   const [filterMonth, setFilterMonth] = useState("");
   const [filterStaffId, setFilterStaffId] = useState("");
@@ -98,6 +118,7 @@ export function AttendancePage() {
     queryKey: [ROOT_KEYS.attendance, params],
     queryFn: () => attendanceApi.list(params),
     placeholderData: (previous) => previous,
+    enabled: view === "records",
   });
 
   const staffParams = useMemo(
@@ -109,19 +130,13 @@ export function AttendancePage() {
     queryFn: () => staffApi.list(staffParams),
   });
 
-  const staffNameById = useMemo(() => {
-    const map = new Map<number, string>();
-    for (const row of staffQuery.data?.records ?? []) map.set(row.id, row.full_name);
-    return map;
-  }, [staffQuery.data]);
-
   const invalidate = () => {
     queryClient.invalidateQueries({ queryKey: [ROOT_KEYS.attendance] });
     queryClient.invalidateQueries({ queryKey: [ROOT_KEYS.adminDashboard] });
     queryClient.invalidateQueries({ queryKey: [ROOT_KEYS.managerDashboard] });
   };
 
-  // Mark form
+  // ---------- Mark single ----------
   const [markOpen, setMarkOpen] = useState(false);
   const [markForm, setMarkForm] = useState<CreateFormState>({
     staff_id: "",
@@ -152,33 +167,6 @@ export function AttendancePage() {
     },
   });
 
-  // Edit form
-  const [editing, setEditing] = useState<AttendanceRecord | null>(null);
-  const [editForm, setEditForm] = useState<EditFormState>({
-    status: "PRESENT",
-    check_in: "",
-    check_out: "",
-    personal_hygiene_checked: false,
-    uniform_checked: false,
-    remarks: "",
-  });
-  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
-  const [editFormError, setEditFormError] = useState<string | null>(null);
-
-  const updateMutation = useMutation({
-    mutationFn: ({ id, payload }: { id: number; payload: Record<string, unknown> }) =>
-      attendanceApi.update(id, payload),
-    onSuccess: () => {
-      invalidate();
-      toast.success("Attendance updated");
-      setEditing(null);
-    },
-    onError: (error) => {
-      setEditErrors(getFieldErrors(error));
-      setEditFormError(getApiErrorMessage(error));
-    },
-  });
-
   const activeStaff = (staffQuery.data?.records ?? []).filter((row) => row.is_active);
 
   const openMark = () => {
@@ -206,21 +194,18 @@ export function AttendancePage() {
     const nextErrors: Record<string, string> = {};
     if (!markForm.staff_id) nextErrors.staff_id = "Select a staff member";
     if (!markForm.attendance_date) nextErrors.attendance_date = "Date is required";
-    if (
-      markForm.check_in &&
-      markForm.check_out &&
-      markForm.check_out < markForm.check_in
-    ) {
-      nextErrors.check_out = "Cannot be earlier than check-in";
-    }
+    if (markForm.attendance_date > todayISO()) nextErrors.attendance_date = "Date cannot be in the future";
+    const timeError = validateTimes(markForm.status, markForm.check_in, markForm.check_out);
+    if (timeError) nextErrors.check_out = timeError;
     setMarkErrors(nextErrors);
     if (Object.keys(nextErrors).length > 0) return;
+    const noTimes = markForm.status === "ABSENT" || markForm.status === "LEAVE";
     markMutation.mutate({
       staff_id: Number(markForm.staff_id),
       attendance_date: markForm.attendance_date,
       status: markForm.status,
-      check_in: markForm.check_in || undefined,
-      check_out: markForm.check_out || undefined,
+      check_in: !noTimes && markForm.check_in ? markForm.check_in : undefined,
+      check_out: !noTimes && markForm.check_out ? markForm.check_out : undefined,
       ...Object.fromEntries(
         UNIFORM_FIELDS.map((field) => [field.key, markForm[field.key]]),
       ) as Pick<CreateFormState, "t_shirt_checked" | "jeans_checked" | "shoes_checked" | "bath_checked" | "cleanliness_checked">,
@@ -228,9 +213,38 @@ export function AttendancePage() {
     });
   };
 
+  // ---------- Edit ----------
+  const [editing, setEditing] = useState<AttendanceRecord | null>(null);
+  const [editForm, setEditForm] = useState<EditFormState>({
+    attendance_date: todayISO(),
+    status: "PRESENT",
+    check_in: "",
+    check_out: "",
+    personal_hygiene_checked: false,
+    uniform_checked: false,
+    remarks: "",
+  });
+  const [editErrors, setEditErrors] = useState<Record<string, string>>({});
+  const [editFormError, setEditFormError] = useState<string | null>(null);
+
+  const updateMutation = useMutation({
+    mutationFn: ({ id, payload }: { id: number; payload: Record<string, unknown> }) =>
+      attendanceApi.update(id, payload),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Attendance updated");
+      setEditing(null);
+    },
+    onError: (error) => {
+      setEditErrors(getFieldErrors(error));
+      setEditFormError(getApiErrorMessage(error));
+    },
+  });
+
   const openEdit = (record: AttendanceRecord) => {
     setEditing(record);
     setEditForm({
+      attendance_date: record.attendance_date.slice(0, 10),
       status: record.status,
       check_in: record.check_in ? record.check_in.slice(0, 5) : "",
       check_out: record.check_out ? record.check_out.slice(0, 5) : "",
@@ -246,23 +260,42 @@ export function AttendancePage() {
     event.preventDefault();
     if (!editing) return;
     setEditFormError(null);
-    if (editForm.check_in && editForm.check_out && editForm.check_out < editForm.check_in) {
-      setEditErrors({ check_out: "Cannot be earlier than check-in" });
+    if (editForm.attendance_date > todayISO()) {
+      setEditErrors({ attendance_date: "Date cannot be in the future" });
+      return;
+    }
+    const timeError = validateTimes(editForm.status, editForm.check_in, editForm.check_out);
+    if (timeError) {
+      setEditErrors({ check_out: timeError });
       return;
     }
     setEditErrors({});
+    const noTimes = editForm.status === "ABSENT" || editForm.status === "LEAVE";
     updateMutation.mutate({
       id: editing.id,
       payload: {
+        attendance_date: editForm.attendance_date,
         status: editForm.status,
-        ...(editForm.check_in ? { check_in: editForm.check_in } : {}),
-        ...(editForm.check_out ? { check_out: editForm.check_out } : {}),
+        ...(noTimes ? {} : editForm.check_in ? { check_in: editForm.check_in } : {}),
+        ...(noTimes ? {} : editForm.check_out ? { check_out: editForm.check_out } : {}),
         personal_hygiene_checked: editForm.personal_hygiene_checked,
         uniform_checked: editForm.uniform_checked,
         ...(editForm.remarks.trim() ? { remarks: editForm.remarks.trim() } : {}),
       },
     });
   };
+
+  // ---------- Delete ----------
+  const [deleting, setDeleting] = useState<AttendanceRecord | null>(null);
+  const deleteMutation = useMutation({
+    mutationFn: (id: number) => attendanceApi.remove(id),
+    onSuccess: () => {
+      invalidate();
+      toast.success("Attendance deleted");
+      setDeleting(null);
+    },
+    onError: (error) => toast.error("Could not delete", getApiErrorMessage(error)),
+  });
 
   const columns: Column<AttendanceRecord>[] = [
     {
@@ -271,15 +304,23 @@ export function AttendancePage() {
       render: (row) => formatDate(row.attendance_date),
     },
     {
-      key: "staff_id",
+      key: "staff",
       header: "Staff",
-      render: (row) =>
-        staffNameById.get(row.staff_id) ?? (
-          <span className="text-slate-400">
-            Staff #{row.staff_id}
-          </span>
-        ),
+      render: (row) => (
+        <span className="font-medium text-slate-800">
+          {row.staff_name ?? `Staff #${row.staff_id}`}
+        </span>
+      ),
     },
+    ...(scopeBranchId === null
+      ? [
+          {
+            key: "branch" as const,
+            header: "Branch",
+            render: (row: AttendanceRecord) => row.branch_name ?? `#${row.branch_id}`,
+          },
+        ]
+      : []),
     {
       key: "status",
       header: "Status",
@@ -310,29 +351,33 @@ export function AttendancePage() {
       header: "Recorded by",
       render: (row) => row.management_name ?? <span className="text-slate-300">—</span>,
     },
-    {
-      key: "remarks",
-      header: "Remarks",
-      render: (row) => (
-        <span className="block max-w-40 truncate text-slate-500" title={row.remarks ?? ""}>
-          {row.remarks || <span className="text-slate-300">—</span>}
-        </span>
-      ),
-    },
-    ...(editAllowed
+    ...(editAllowed || deleteAllowed
       ? [
           {
             key: "actions" as const,
             header: "",
-            className: "w-16 text-right",
+            className: "w-20 text-right",
             render: (row: AttendanceRecord) => (
-              <button
-                onClick={() => openEdit(row)}
-                className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-brand-600"
-                aria-label="Edit attendance"
-              >
-                <IconPencil className="h-4 w-4" />
-              </button>
+              <div className="flex items-center justify-end gap-1">
+                {editAllowed && (
+                  <button
+                    onClick={() => openEdit(row)}
+                    className="rounded p-1.5 text-slate-400 transition hover:bg-slate-100 hover:text-brand-600"
+                    aria-label="Edit attendance"
+                  >
+                    <IconPencil className="h-4 w-4" />
+                  </button>
+                )}
+                {deleteAllowed && (
+                  <button
+                    onClick={() => setDeleting(row)}
+                    className="rounded p-1.5 text-slate-400 transition hover:bg-red-50 hover:text-red-600"
+                    aria-label="Delete attendance"
+                  >
+                    <IconTrash className="h-4 w-4" />
+                  </button>
+                )}
+              </div>
             ),
           },
         ]
@@ -344,9 +389,9 @@ export function AttendancePage() {
       <PageHeader
         title="Attendance"
         subtitle={
-          scopeBranchId === null
-            ? "Daily attendance across branches."
-            : "Daily attendance for your branch."
+          scopeBranchName
+            ? `Daily attendance — ${scopeBranchName}.`
+            : "Daily attendance across branches."
         }
         actions={
           markAllowed && (
@@ -358,90 +403,111 @@ export function AttendancePage() {
         }
       />
 
-      <FilterBar className="mb-4">
-        <Input
-          label="Day"
-          type="date"
-          value={filterDate}
-          onChange={(event) => {
-            setFilterDate(event.target.value);
-            setPage(1);
-          }}
-          className="w-40"
-        />
-        <Input
-          label="…or month"
-          type="month"
-          value={filterMonth}
-          onChange={(event) => {
-            setFilterMonth(event.target.value);
-            setPage(1);
-          }}
-          hint="Overrides the day filter"
-          className="w-40"
-        />
-        <Select
-          label="Staff"
-          value={filterStaffId}
-          onChange={(event) => {
-            setFilterStaffId(event.target.value);
-            setPage(1);
-          }}
-          className="w-52"
-        >
-          <option value="">All staff</option>
-          {(staffQuery.data?.records ?? []).map((row) => (
-            <option key={row.id} value={row.id}>
-              {row.full_name} ({row.employee_code})
-            </option>
-          ))}
-        </Select>
-        {(filterDate || filterMonth || filterStaffId) && (
-          <Button
-            variant="ghost"
-            onClick={() => {
-              setFilterMonth("");
-              setFilterStaffId("");
-              setFilterDate(todayISO());
+      <div className="mb-4 flex gap-1 rounded-lg border border-slate-200 bg-white p-1 shadow-sm">
+        {(["records", "mark-day"] as const).map((tab) => (
+          <button
+            key={tab}
+            onClick={() => setView(tab)}
+            className={`rounded-md px-3 py-1.5 text-sm font-medium transition ${
+              view === tab ? "bg-brand-600 text-white shadow-sm" : "text-slate-600 hover:bg-slate-100"
+            }`}
+          >
+            {tab === "records" ? "Records" : "Mark day"}
+          </button>
+        ))}
+      </div>
+
+      {view === "records" ? (
+        <>
+          <FilterBar className="mb-4">
+            <Input
+              label="Day"
+              type="date"
+              max={todayISO()}
+              value={filterDate}
+              onChange={(event) => {
+                setFilterDate(event.target.value);
+                setPage(1);
+              }}
+              className="w-40"
+            />
+            <Input
+              label="…or month"
+              type="month"
+              value={filterMonth}
+              onChange={(event) => {
+                setFilterMonth(event.target.value);
+                setPage(1);
+              }}
+              hint="Overrides the day filter"
+              className="w-40"
+            />
+            <Select
+              label="Staff"
+              value={filterStaffId}
+              onChange={(event) => {
+                setFilterStaffId(event.target.value);
+                setPage(1);
+              }}
+              className="w-52"
+            >
+              <option value="">All staff</option>
+              {(staffQuery.data?.records ?? []).map((row) => (
+                <option key={row.id} value={row.id}>
+                  {row.full_name} ({row.employee_code})
+                </option>
+              ))}
+            </Select>
+            {(filterDate || filterMonth || filterStaffId) && (
+              <Button
+                variant="ghost"
+                onClick={() => {
+                  setFilterMonth("");
+                  setFilterStaffId("");
+                  setFilterDate(todayISO());
+                  setPage(1);
+                }}
+              >
+                Reset filters
+              </Button>
+            )}
+          </FilterBar>
+
+          <DataTable
+            columns={columns}
+            rows={query.data?.records ?? []}
+            rowKey={(row) => row.id}
+            loading={query.isLoading}
+            error={query.error}
+            onRetry={() => query.refetch()}
+            emptyTitle="No attendance records"
+            emptyDescription={
+              markAllowed
+                ? "Mark the first attendance record for this date range, or use Mark day."
+                : "No attendance has been recorded for this date range yet."
+            }
+            emptyAction={
+              markAllowed && (
+                <Button onClick={openMark}>
+                  <IconPlus className="h-4 w-4" />
+                  Mark attendance
+                </Button>
+              )
+            }
+          />
+
+          <Pagination
+            meta={query.data?.pagination}
+            onPageChange={setPage}
+            onPageSizeChange={(size) => {
+              setPageSize(size);
               setPage(1);
             }}
-          >
-            Reset filters
-          </Button>
-        )}
-      </FilterBar>
-
-      <DataTable
-        columns={columns}
-        rows={query.data?.records ?? []}
-        rowKey={(row) => row.id}
-        loading={query.isLoading}
-        error={query.error}
-        onRetry={() => query.refetch()}
-        emptyTitle="No attendance records"
-        emptyDescription={
-          markAllowed
-            ? "Mark the first attendance record for this date range."
-            : "No attendance has been recorded for this date range yet."
-        }
-        emptyAction={
-          markAllowed && (
-            <Button onClick={openMark}>
-              <IconPlus className="h-4 w-4" />
-              Mark attendance
-            </Button>
-          )
-        }
-      />
-
-      <Pagination
-        meta={query.data?.pagination}
-        onPageChange={setPage}
-        onPageSizeChange={(size) => {
-          setPageSize(size);
-          setPage(1);
-        }}
-      />
+          />
+        </>
+      ) : (
+        <MarkDayView onDone={invalidate} />
+      )}
 
       {/* Mark modal */}
       <Modal
@@ -509,12 +575,14 @@ export function AttendancePage() {
                 label="Check-in"
                 type="time"
                 value={markForm.check_in}
+                disabled={markForm.status === "ABSENT" || markForm.status === "LEAVE"}
                 onChange={(event) => setMarkForm({ ...markForm, check_in: event.target.value })}
               />
               <Input
                 label="Check-out"
                 type="time"
                 value={markForm.check_out}
+                disabled={markForm.status === "ABSENT" || markForm.status === "LEAVE"}
                 onChange={(event) => setMarkForm({ ...markForm, check_out: event.target.value })}
                 error={markErrors.check_out}
               />
@@ -557,7 +625,7 @@ export function AttendancePage() {
         open={editing !== null}
         onClose={() => setEditing(null)}
         title={`Edit attendance — ${editing ? formatDate(editing.attendance_date) : ""}`}
-        subtitle={editing ? staffNameById.get(editing.staff_id) ?? `Staff #${editing.staff_id}` : undefined}
+        subtitle={editing?.staff_name ?? (editing ? `Staff #${editing.staff_id}` : undefined)}
         footer={
           <>
             <Button variant="secondary" onClick={() => setEditing(null)} disabled={updateMutation.isPending}>
@@ -576,6 +644,15 @@ export function AttendancePage() {
             </div>
           )}
           <div className="grid grid-cols-1 gap-4 sm:grid-cols-2">
+            <Input
+              label="Date"
+              type="date"
+              max={todayISO()}
+              value={editForm.attendance_date}
+              onChange={(event) => setEditForm({ ...editForm, attendance_date: event.target.value })}
+              error={editErrors.attendance_date}
+              required
+            />
             <Select
               label="Status"
               value={editForm.status}
@@ -590,17 +667,19 @@ export function AttendancePage() {
                 </option>
               ))}
             </Select>
-            <div className="grid grid-cols-2 gap-3">
+            <div className="grid grid-cols-2 gap-3 sm:col-span-2">
               <Input
                 label="Check-in"
                 type="time"
                 value={editForm.check_in}
+                disabled={editForm.status === "ABSENT" || editForm.status === "LEAVE"}
                 onChange={(event) => setEditForm({ ...editForm, check_in: event.target.value })}
               />
               <Input
                 label="Check-out"
                 type="time"
                 value={editForm.check_out}
+                disabled={editForm.status === "ABSENT" || editForm.status === "LEAVE"}
                 onChange={(event) => setEditForm({ ...editForm, check_out: event.target.value })}
                 error={editErrors.check_out}
               />
@@ -630,6 +709,211 @@ export function AttendancePage() {
           />
         </form>
       </Modal>
+
+      <ConfirmDialog
+        open={deleting !== null}
+        title="Delete attendance"
+        message={
+          <>
+            Delete the attendance record for{" "}
+            <strong>
+              {deleting?.staff_name ?? `staff #${deleting?.staff_id}`}
+            </strong>{" "}
+            on <strong>{deleting ? formatDate(deleting.attendance_date) : ""}</strong>? This
+            cannot be undone.
+          </>
+        }
+        confirmLabel="Delete"
+        danger
+        loading={deleteMutation.isPending}
+        onConfirm={() => deleting && deleteMutation.mutate(deleting.id)}
+        onCancel={() => setDeleting(null)}
+      />
     </div>
+  );
+}
+
+interface DayDraft {
+  status: AttendanceStatus;
+  check_in: string;
+  check_out: string;
+}
+
+function MarkDayView({ onDone }: { onDone: () => void }) {
+  const toast = useToast();
+  const { scopeBranchId } = useBranches();
+  const [day, setDay] = useState(todayISO());
+  const [drafts, setDrafts] = useState<Record<number, DayDraft>>({});
+
+  const tableQuery = useQuery({
+    queryKey: [ROOT_KEYS.attendance, "table", scopeBranchId, day],
+    queryFn: () => attendanceApi.table({ attendance_date: day, branch_id: scopeBranchId ?? undefined }),
+    enabled: day !== "",
+  });
+
+  // Reset per-row drafts whenever a new table loads.
+  const rows: AttendanceTableRow[] = tableQuery.data?.records ?? [];
+  const unmarked = rows.filter((row) => row.status === null);
+
+  const setDraft = (staffId: number, patch: Partial<DayDraft>) => {
+    setDrafts((current) => {
+      const prev: DayDraft = current[staffId] ?? {
+        status: "PRESENT",
+        check_in: "",
+        check_out: "",
+      };
+      return { ...current, [staffId]: { ...prev, ...patch } };
+    });
+  };
+
+  const bulkMutation = useMutation({
+    mutationFn: attendanceApi.bulk,
+    onSuccess: (created) => {
+      onDone();
+      toast.success(`${created.length} attendance records created`);
+      setDrafts({});
+      tableQuery.refetch();
+    },
+    onError: (error) => toast.error("Bulk marking failed", getApiErrorMessage(error)),
+  });
+
+  const submit = (event: FormEvent) => {
+    event.preventDefault();
+    const records: {
+      staff_id: number;
+      attendance_date: string;
+      status: AttendanceStatus;
+      check_in?: string;
+      check_out?: string;
+    }[] = [];
+    for (const row of unmarked) {
+      const draft = drafts[row.staff_id] ?? { status: "PRESENT" as AttendanceStatus, check_in: "", check_out: "" };
+      const noTimes = draft.status === "ABSENT" || draft.status === "LEAVE";
+      const problem = validateTimes(draft.status, draft.check_in, draft.check_out);
+      if (problem) {
+        toast.error(`Row ${row.staff_name}: ${problem}`);
+        return;
+      }
+      records.push({
+        staff_id: row.staff_id,
+        attendance_date: day,
+        status: draft.status,
+        check_in: !noTimes && draft.check_in ? draft.check_in : undefined,
+        check_out: !noTimes && draft.check_out ? draft.check_out : undefined,
+      });
+    }
+    if (records.length === 0) {
+      toast.info("Nothing to submit", "All staff are already marked for this date.");
+      return;
+    }
+    bulkMutation.mutate({ attendance_date: day, records });
+  };
+
+  return (
+    <form onSubmit={submit}>
+      <FilterBar className="mb-4">
+        <Input
+          label="Date"
+          type="date"
+          max={todayISO()}
+          value={day}
+          onChange={(event) => setDay(event.target.value)}
+          required
+          className="w-44"
+        />
+        {tableQuery.data && (
+          <span className="self-center pb-1.5 text-xs text-slate-500">
+            {tableQuery.data.branch_name} · {unmarked.length} of {rows.length} unmarked
+          </span>
+        )}
+        <Button
+          type="submit"
+          size="sm"
+          loading={bulkMutation.isPending}
+          disabled={tableQuery.isLoading || unmarked.length === 0}
+          className="ml-auto self-center"
+        >
+          <IconCheck className="h-4 w-4" />
+          Submit day
+        </Button>
+      </FilterBar>
+
+      <DataTable
+        columns={[
+          {
+            key: "staff_name",
+            header: "Staff",
+            render: (row: AttendanceTableRow) => (
+              <span className="font-medium text-slate-800">{row.staff_name}</span>
+            ),
+          },
+          {
+            key: "status",
+            header: "Current",
+            render: (row: AttendanceTableRow) =>
+              row.status ? <StatusBadge value={row.status} /> : <span className="text-slate-300">Not marked</span>,
+          },
+          {
+            key: "mark",
+            header: "Mark as",
+            render: (row: AttendanceTableRow) =>
+              row.status ? (
+                <span className="text-xs text-slate-400">—</span>
+              ) : (
+                <select
+                  value={drafts[row.staff_id]?.status ?? "PRESENT"}
+                  onChange={(event) => setDraft(row.staff_id, { status: event.target.value as AttendanceStatus })}
+                  className="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500"
+                >
+                  {ATTENDANCE_STATUSES.map((status) => (
+                    <option key={status} value={status}>
+                      {enumLabel(status)}
+                    </option>
+                  ))}
+                </select>
+              ),
+          },
+          {
+            key: "check_in",
+            header: "Check-in",
+            render: (row: AttendanceTableRow) =>
+              row.status ? (
+                formatTime(row.check_in)
+              ) : (
+                <input
+                  type="time"
+                  value={drafts[row.staff_id]?.check_in ?? ""}
+                  disabled={(drafts[row.staff_id]?.status ?? "PRESENT") === "ABSENT" || (drafts[row.staff_id]?.status ?? "PRESENT") === "LEAVE"}
+                  onChange={(event) => setDraft(row.staff_id, { check_in: event.target.value })}
+                  className="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 disabled:bg-slate-50"
+                />
+              ),
+          },
+          {
+            key: "check_out",
+            header: "Check-out",
+            render: (row: AttendanceTableRow) =>
+              row.status ? (
+                formatTime(row.check_out)
+              ) : (
+                <input
+                  type="time"
+                  value={drafts[row.staff_id]?.check_out ?? ""}
+                  disabled={(drafts[row.staff_id]?.status ?? "PRESENT") === "ABSENT" || (drafts[row.staff_id]?.status ?? "PRESENT") === "LEAVE"}
+                  onChange={(event) => setDraft(row.staff_id, { check_out: event.target.value })}
+                  className="rounded border border-slate-300 px-1.5 py-1 text-xs outline-none focus:border-brand-500 disabled:bg-slate-50"
+                />
+              ),
+          },
+        ]}
+        rows={rows}
+        rowKey={(row) => row.staff_id}
+        loading={tableQuery.isLoading}
+        error={tableQuery.error}
+        onRetry={() => tableQuery.refetch()}
+        emptyTitle="No active staff"
+        emptyDescription="There are no active staff at this branch to mark."
+      />
+    </form>
   );
 }

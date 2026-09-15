@@ -6,22 +6,20 @@ export type Capability =
   | "staff.manage"
   | "attendance.mark"
   | "attendance.edit"
+  | "attendance.delete"
   | "cleaning.create"
   | "cleaning.update"
+  | "cleaning.delete"
   | "inventory.create"
   | "inventory.update"
   | "inventory.sheets"
   | "inventory.seed"
   | "requests.create"
   | "requests.action"
-  | "customers.create"
-  | "customers.edit"
   | "reviews.create"
   | "reviews.update"
   | "complaints.create"
   | "complaints.update"
-  | "inspections.create"
-  | "remarks.create"
   | "reports.audit";
 
 const MATRIX: Record<Capability, Role[]> = {
@@ -30,22 +28,20 @@ const MATRIX: Record<Capability, Role[]> = {
   "staff.manage": ["ADMIN"],
   "attendance.mark": ["ADMIN", "MANAGER"],
   "attendance.edit": ["ADMIN", "MANAGER"],
+  "attendance.delete": ["ADMIN", "MANAGER"],
   "cleaning.create": ["MANAGER"],
   "cleaning.update": ["ADMIN", "MANAGER"],
+  "cleaning.delete": ["ADMIN", "MANAGER"],
   "inventory.create": ["ADMIN"],
   "inventory.update": ["ADMIN", "MANAGER"],
   "inventory.sheets": ["ADMIN", "MANAGER"],
   "inventory.seed": ["ADMIN"],
   "requests.create": ["MANAGER"],
   "requests.action": ["ADMIN"],
-  "customers.create": ["MANAGER"],
-  "customers.edit": ["ADMIN", "MANAGER"],
-  "reviews.create": ["ADMIN", "MANAGER"],
+  "reviews.create": ["MANAGER"],
   "reviews.update": ["ADMIN", "MANAGER"],
   "complaints.create": ["MANAGER"],
   "complaints.update": ["ADMIN", "MANAGER"],
-  "inspections.create": ["MANAGER"],
-  "remarks.create": ["MANAGER"],
   "reports.audit": ["ADMIN"],
 };
 

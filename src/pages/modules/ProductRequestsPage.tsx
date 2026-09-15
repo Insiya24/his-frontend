@@ -1,4 +1,4 @@
-import { useMemo, useState, type FormEvent } from "react";
+import { useState, type FormEvent } from "react";
 import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import { productRequestsApi } from "@/api/productRequests";
 import { inventoryApi } from "@/api/inventory";
@@ -39,9 +39,12 @@ export function ProductRequestsPage() {
   const createAllowed = can(role, "requests.create");
   const actionAllowed = can(role, "requests.action");
 
+  // Status filter (server-side)
+  const [statusFilter, setStatusFilter] = useState<string>("");
+
   const query = useQuery({
-    queryKey: [ROOT_KEYS.productRequests],
-    queryFn: () => productRequestsApi.list(),
+    queryKey: [ROOT_KEYS.productRequests, statusFilter || "all"],
+    queryFn: () => productRequestsApi.list(statusFilter || undefined),
   });
 
   const invalidate = () => {
@@ -50,13 +53,7 @@ export function ProductRequestsPage() {
     queryClient.invalidateQueries({ queryKey: [ROOT_KEYS.managerDashboard] });
   };
 
-  // Status filter
-  const [statusFilter, setStatusFilter] = useState<string>("");
-  const filtered = useMemo(() => {
-    const rows = query.data ?? [];
-    if (!statusFilter) return rows;
-    return rows.filter((row) => row.status === statusFilter);
-  }, [query.data, statusFilter]);
+  const rows = query.data ?? [];
 
   // Create form (manager)
   const inventoryQuery = useQuery({
@@ -123,7 +120,6 @@ export function ProductRequestsPage() {
     if (Object.keys(nextErrors).length > 0 || !selectedItem) return;
     createMutation.mutate({
       product_name: selectedItem.product_name,
-      available_quantity: selectedItem.current_stock,
       required_quantity: Number(form.required_quantity),
       reason: form.reason.trim(),
       priority: form.priority,
@@ -274,13 +270,13 @@ export function ProductRequestsPage() {
           ))}
         </Select>
         <span className="ml-auto self-center pb-1.5 text-xs text-slate-500">
-          {filtered.length} request{filtered.length === 1 ? "" : "s"}
+          {rows.length} request{rows.length === 1 ? "" : "s"}
         </span>
       </FilterBar>
 
       <DataTable
         columns={columns}
-        rows={filtered}
+        rows={rows}
         rowKey={(row) => row.id}
         loading={query.isLoading}
         error={query.error}

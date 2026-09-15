@@ -11,7 +11,6 @@ import {
   IconInbox,
   IconMessageSquare,
   IconPackage,
-  IconShield,
   IconStar,
   IconTruck,
   IconUser,
@@ -157,18 +156,6 @@ export function AdminDashboardPage() {
               tone={data.open_complaints > 0 ? "danger" : "default"}
               icon={<IconMessageSquare className="h-4 w-4" />}
               to="/admin/complaints"
-            />
-            <KpiCard
-              label="Today's inspections"
-              value={data.today_inspections}
-              icon={<IconShield className="h-4 w-4" />}
-              to="/admin/inspections"
-            />
-            <KpiCard
-              label="Customers today"
-              value={data.today_customers}
-              icon={<IconUsers className="h-4 w-4" />}
-              to="/admin/customers"
             />
             <KpiCard
               label="Average rating"

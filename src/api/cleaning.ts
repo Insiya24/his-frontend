@@ -1,4 +1,4 @@
-import { httpGet, httpPatch, httpPost } from "./client";
+import { httpDelete, httpGet, httpPatch, httpPost } from "./client";
 import type { CleaningChecklist, CleaningChecklistPayload } from "@/types/cleaning";
 
 export const cleaningApi = {
@@ -17,5 +17,9 @@ export const cleaningApi = {
     payload: CleaningChecklistPayload,
   ): Promise<CleaningChecklist> {
     return httpPatch<CleaningChecklist>(`/cleaning/${checklistId}`, payload);
+  },
+
+  remove(checklistId: number): Promise<void> {
+    return httpDelete<void>(`/cleaning/${checklistId}`);
   },
 };

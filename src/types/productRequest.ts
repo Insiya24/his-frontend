@@ -25,7 +25,6 @@ export interface ProductRequest {
 
 export interface ProductRequestCreateRequest {
   product_name: string;
-  available_quantity: number;
   required_quantity: number;
   reason: string;
   priority?: RequestPriority;
